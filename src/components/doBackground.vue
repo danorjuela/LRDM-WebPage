@@ -1,5 +1,5 @@
 <template>
-  <div class="dots-container" :class="{ 'dark-mode': isDarkMode }" @mousemove="updateMousePosition">
+  <div class="dots-container" :class="{ 'dark-mode': isDarkMode }" @mousemove="updateMousePosition" @click="createWave">
     <!-- Contenedor de puntos -->
     <svg class="dots-svg" :width="containerWidth" :height="containerHeight">
       <rect
@@ -16,7 +16,7 @@
     </svg>
 
     <!-- Contenido de ejemplo -->
-    <div class=" content-overlay d-flex flex-column justify-content-center align-items-center h-100">
+    <div class="content-overlay d-flex flex-column justify-content-center align-items-center h-100">
       <div class="text-center glass p-3">
         <h1 :class="isDarkMode ? 'text-white' : 'text-dark'">
           La Revolución del Mundo
@@ -51,11 +51,18 @@ export default {
     const containerWidth = ref(window.innerWidth)
     const containerHeight = ref(window.innerHeight)
     const dots = ref([])
+    const waves = ref([])
     
     // Configuración de los puntos
     const baseRadius = 2
     const maxRadius = 8
     const effectRadius = 100
+    
+    // Configuración de las ondas
+    const waveSpeed = 200 // píxeles por segundo
+    const waveMaxRadius = 400
+    const waveDuration = 2000 // milisegundos (aumentado para más suavidad)
+    const waveStrength = 10 // intensidad del efecto (reducido para más sutileza)
     
     // Color de los puntos basado en el modo
     const dotColor = computed(() => {
@@ -72,6 +79,53 @@ export default {
       mouseX.value = event.clientX
       mouseY.value = event.clientY
       updateDots()
+    }
+    
+    // Función para crear una onda expansiva
+    const createWave = (event) => {
+      const clickX = event.clientX
+      const clickY = event.clientY
+      
+      const wave = {
+        id: Date.now() + Math.random(),
+        x: clickX,
+        y: clickY,
+        radius: 0,
+        maxRadius: waveMaxRadius,
+        startTime: Date.now(),
+        duration: waveDuration,
+        active: true
+      }
+      
+      waves.value.push(wave)
+      
+      // Eliminar la onda después de que termine
+      setTimeout(() => {
+        const index = waves.value.findIndex(w => w.id === wave.id)
+        if (index > -1) {
+          waves.value.splice(index, 1)
+        }
+      }, waveDuration + 200)
+    }
+    
+    // Función para actualizar las ondas
+    const updateWaves = () => {
+      const currentTime = Date.now()
+      
+      waves.value.forEach(wave => {
+        if (wave.active) {
+          const elapsed = currentTime - wave.startTime
+          const progress = Math.min(elapsed / wave.duration, 1)
+          
+          // Usar una función de easing para suavizar la animación
+          const easeOut = 1 - Math.pow(1 - progress, 3)
+          wave.radius = easeOut * wave.maxRadius
+          
+          if (progress >= 1) {
+            wave.active = false
+          }
+        }
+      })
     }
     
     // Función para crear la cuadrícula de puntos con distribución más orgánica
@@ -104,7 +158,8 @@ export default {
               baseX: finalX,
               baseY: finalY,
               radius: baseRadius,
-              opacity: isDarkMode.value ? 0.6 : 0.4
+              opacity: isDarkMode.value ? 0.6 : 0.4,
+              waveOffset: 0
             })
           }
         }
@@ -113,23 +168,59 @@ export default {
       dots.value = newDots
     }
     
-    // Función para actualizar el tamaño de los puntos basado en la distancia al mouse
+    // Función para actualizar el tamaño de los puntos basado en mouse y ondas
     const updateDots = () => {
+      updateWaves()
+      
       dots.value.forEach(dot => {
-        const distance = Math.sqrt(
+        let finalRadius = baseRadius
+        let finalOpacity = isDarkMode.value ? 0.6 : 0.4
+        
+        // Efecto del mouse
+        const mouseDistance = Math.sqrt(
           Math.pow(mouseX.value - dot.baseX, 2) + 
           Math.pow(mouseY.value - dot.baseY, 2)
         )
         
-        if (distance < effectRadius) {
-          // Calcular el factor de escala basado en la distancia
-          const scaleFactor = 1 - (distance / effectRadius)
-          dot.radius = baseRadius + (maxRadius - baseRadius) * scaleFactor
-          dot.opacity = (isDarkMode.value ? 0.6 : 0.4) + 0.4 * scaleFactor
-        } else {
-          dot.radius = baseRadius
-          dot.opacity = isDarkMode.value ? 0.6 : 0.4
+        if (mouseDistance < effectRadius) {
+          const mouseScaleFactor = 1 - (mouseDistance / effectRadius)
+          finalRadius = Math.max(finalRadius, baseRadius + (maxRadius - baseRadius) * mouseScaleFactor)
+          finalOpacity = Math.max(finalOpacity, (isDarkMode.value ? 0.6 : 0.4) + 0.4 * mouseScaleFactor)
         }
+        
+        // Efecto de las ondas
+        waves.value.forEach(wave => {
+          if (wave.active) {
+            const waveDistance = Math.sqrt(
+              Math.pow(wave.x - dot.baseX, 2) + 
+              Math.pow(wave.y - dot.baseY, 2)
+            )
+            
+            // Calcular la intensidad basada en la distancia a la onda
+            const waveBorder = Math.abs(waveDistance - wave.radius)
+            const waveThickness = 50 // grosor del borde de la onda
+            
+            // Calcular el progreso de la onda para el fade out
+            const elapsed = Date.now() - wave.startTime
+            const progress = Math.min(elapsed / wave.duration, 1)
+            const fadeOut = 1 - Math.pow(progress, 2) // fade out cuadrático más suave
+            
+            if (waveBorder < waveThickness && fadeOut > 0) {
+              const waveIntensity = (1 - (waveBorder / waveThickness)) * fadeOut
+              const waveEffect = waveIntensity * waveStrength
+              
+              finalRadius = Math.max(finalRadius, baseRadius + waveEffect)
+              finalOpacity = Math.max(finalOpacity, (isDarkMode.value ? 0.6 : 0.4) + 0.8 * waveIntensity)
+            }
+          }
+        })
+        
+        dot.radius = finalRadius
+        dot.opacity = finalOpacity
+        
+        // Actualizar posición visual
+        dot.x = dot.baseX + dot.waveOffset
+        dot.y = dot.baseY + dot.waveOffset
       })
     }
     
@@ -140,9 +231,16 @@ export default {
       createDots()
     }
     
+    // Loop de animación
+    const animate = () => {
+      updateDots()
+      requestAnimationFrame(animate)
+    }
+    
     // Ciclo de vida del componente
     onMounted(() => {
       createDots()
+      animate()
       window.addEventListener('resize', handleResize)
     })
     
@@ -159,7 +257,8 @@ export default {
       dots,
       dotColor,
       toggleDarkMode,
-      updateMousePosition
+      updateMousePosition,
+      createWave
     }
   }
 }
@@ -173,6 +272,7 @@ export default {
   overflow: hidden;
   transition: background-color 0.3s ease;
   background-color: #ffffff;
+  cursor: pointer;
 }
 
 .dots-container.dark-mode {
@@ -190,7 +290,7 @@ export default {
 }
 
 .dot {
-  transition: all 0.1s ease-out;
+  transition: all 0.08s ease-out;
 }
 
 .content-overlay {
