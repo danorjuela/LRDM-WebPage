@@ -9,7 +9,7 @@
         :y="dot.y - dot.radius"
         :width="dot.radius * 2"
         :height="dot.radius * 2"
-        :fill="dotColor"
+        :fill="dot.color"
         :opacity="dot.opacity"
         class="dot"
       />
@@ -52,6 +52,7 @@ export default {
     const containerHeight = ref(window.innerHeight)
     const dots = ref([])
     const waves = ref([])
+    const autoWaveInterval = ref(null)
     
     // Configuración de los puntos
     const baseRadius = 2
@@ -63,6 +64,10 @@ export default {
     const waveMaxRadius = 400
     const waveDuration = 2000 // milisegundos (aumentado para más suavidad)
     const waveStrength = 10 // intensidad del efecto (reducido para más sutileza)
+    
+    // Configuración de ondas automáticas
+    const autoWaveIntervalTime = 4000 // cada 4 segundos para mejor efecto visual
+    const waveColors = ['#00ff88', '#ffdd00', '#0099ff', '#ff6644', '#bb44ff', '#44ff99'] // paleta expandida y más vibrante
     
     // Color de los puntos basado en el modo
     const dotColor = computed(() => {
@@ -82,9 +87,17 @@ export default {
     }
     
     // Función para crear una onda expansiva
-    const createWave = (event) => {
-      const clickX = event.clientX
-      const clickY = event.clientY
+    const createWave = (event, isAuto = false, autoColor = null) => {
+      let clickX, clickY
+      
+      if (isAuto) {
+        // Posición aleatoria para ondas automáticas
+        clickX = Math.random() * containerWidth.value
+        clickY = Math.random() * containerHeight.value
+      } else {
+        clickX = event.clientX
+        clickY = event.clientY
+      }
       
       const wave = {
         id: Date.now() + Math.random(),
@@ -94,7 +107,9 @@ export default {
         maxRadius: waveMaxRadius,
         startTime: Date.now(),
         duration: waveDuration,
-        active: true
+        active: true,
+        color: autoColor || null, // Color para ondas automáticas
+        isAuto: isAuto
       }
       
       waves.value.push(wave)
@@ -159,7 +174,9 @@ export default {
               baseY: finalY,
               radius: baseRadius,
               opacity: isDarkMode.value ? 0.6 : 0.4,
-              waveOffset: 0
+              waveOffset: 0,
+              color: dotColor.value, // Color base del punto
+              waveColors: [] // Array para almacenar colores de ondas activas
             })
           }
         }
@@ -175,6 +192,10 @@ export default {
       dots.value.forEach(dot => {
         let finalRadius = baseRadius
         let finalOpacity = isDarkMode.value ? 0.6 : 0.4
+        let activeWaveColors = []
+        
+        // Limpiar colores de ondas anteriores
+        dot.waveColors = []
         
         // Efecto del mouse
         const mouseDistance = Math.sqrt(
@@ -198,25 +219,43 @@ export default {
             
             // Calcular la intensidad basada en la distancia a la onda
             const waveBorder = Math.abs(waveDistance - wave.radius)
-            const waveThickness = 50 // grosor del borde de la onda
+            const waveThickness = 60 // aumentado para mejor mezcla de colores
             
             // Calcular el progreso de la onda para el fade out
             const elapsed = Date.now() - wave.startTime
             const progress = Math.min(elapsed / wave.duration, 1)
-            const fadeOut = 1 - Math.pow(progress, 2) // fade out cuadrático más suave
+            const fadeOut = 1 - Math.pow(progress, 1.5) // fade out más gradual
             
             if (waveBorder < waveThickness && fadeOut > 0) {
-              const waveIntensity = (1 - (waveBorder / waveThickness)) * fadeOut
+              const distanceIntensity = 1 - (waveBorder / waveThickness)
+              const waveIntensity = distanceIntensity * fadeOut
               const waveEffect = waveIntensity * waveStrength
               
               finalRadius = Math.max(finalRadius, baseRadius + waveEffect)
               finalOpacity = Math.max(finalOpacity, (isDarkMode.value ? 0.6 : 0.4) + 0.8 * waveIntensity)
+              
+              // Aplicar color de onda automática si existe
+              if (wave.isAuto && wave.color && waveIntensity > 0.1) { // umbral más bajo
+                activeWaveColors.push({
+                  color: wave.color,
+                  intensity: waveIntensity
+                })
+              }
             }
           }
         })
         
+        // Aplicar mezcla de colores
+        if (activeWaveColors.length > 0) {
+          dot.color = blendMultipleColors(dotColor.value, activeWaveColors)
+        } else {
+          // Transición suave de vuelta al color base
+          dot.color = dotColor.value
+        }
+        
         dot.radius = finalRadius
         dot.opacity = finalOpacity
+        dot.waveColors = activeWaveColors
         
         // Actualizar posición visual
         dot.x = dot.baseX + dot.waveOffset
@@ -231,6 +270,73 @@ export default {
       createDots()
     }
     
+    // Función para mezclar colores usando interpolación
+    const blendColors = (color1, color2, ratio) => {
+      // Convertir colores hex a RGB
+      const hexToRgb = (hex) => {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+        return result ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16)
+        } : null
+      }
+      
+      // Convertir RGB a hex
+      const rgbToHex = (r, g, b) => {
+        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)
+      }
+      
+      const rgb1 = hexToRgb(color1)
+      const rgb2 = hexToRgb(color2)
+      
+      if (!rgb1 || !rgb2) return color1
+      
+      const r = Math.round(rgb1.r + (rgb2.r - rgb1.r) * ratio)
+      const g = Math.round(rgb1.g + (rgb2.g - rgb1.g) * ratio)
+      const b = Math.round(rgb1.b + (rgb2.b - rgb1.b) * ratio)
+      
+      return rgbToHex(r, g, b)
+    }
+    
+    // Función para mezclar múltiples colores
+    const blendMultipleColors = (baseColor, waveColors) => {
+      if (waveColors.length === 0) return baseColor
+      
+      let result = baseColor
+      let totalIntensity = 0
+      
+      // Calcular la intensidad total
+      waveColors.forEach(wc => {
+        totalIntensity += wc.intensity
+      })
+      
+      // Limitar la intensidad total para evitar saturación excesiva
+      totalIntensity = Math.min(totalIntensity, 1.0)
+      
+      // Mezclar colores según su intensidad relativa
+      waveColors.forEach(wc => {
+        const normalizedIntensity = (wc.intensity / totalIntensity) * totalIntensity
+        result = blendColors(result, wc.color, normalizedIntensity * 0.8) // 0.8 para mantener algo del color base
+      })
+      
+      return result
+    }
+    const startAutoWaves = () => {
+      autoWaveInterval.value = setInterval(() => {
+        const randomColor = waveColors[Math.floor(Math.random() * waveColors.length)]
+        createWave(null, true, randomColor)
+      }, autoWaveIntervalTime)
+    }
+    
+    // Función para detener ondas automáticas
+    const stopAutoWaves = () => {
+      if (autoWaveInterval.value) {
+        clearInterval(autoWaveInterval.value)
+        autoWaveInterval.value = null
+      }
+    }
+    
     // Loop de animación
     const animate = () => {
       updateDots()
@@ -241,10 +347,12 @@ export default {
     onMounted(() => {
       createDots()
       animate()
+      startAutoWaves()
       window.addEventListener('resize', handleResize)
     })
     
     onUnmounted(() => {
+      stopAutoWaves()
       window.removeEventListener('resize', handleResize)
     })
     
@@ -290,7 +398,7 @@ export default {
 }
 
 .dot {
-  transition: all 0.08s ease-out;
+  transition: all 0.12s ease-out;
 }
 
 .content-overlay {
